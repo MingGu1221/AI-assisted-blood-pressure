@@ -1,0 +1,172 @@
+import pandas as pd
+import numpy as np
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+import xgboost as xgb
+from sklearn.metrics import accuracy_score
+
+excel_files = {
+    "sit": "C:\\Users\\Ming\\Dropbox\\AAA_NUS\\Zi-ang ML\\BP dataset\\BP data set 13-12-2024\\AI\\sit.xlsx",
+    "lie": "C:\\Users\\Ming\\Dropbox\\AAA_NUS\\Zi-ang ML\\BP dataset\\BP data set 13-12-2024\\AI\\lie down.xlsx",
+    "exercise": "C:\\Users\\Ming\\Dropbox\\AAA_NUS\\Zi-ang ML\\BP dataset\\BP data set 13-12-2024\\AI\\excercise.xlsx",
+    "chocolate": "C:\\Users\\Ming\\Dropbox\\AAA_NUS\\Zi-ang ML\\BP dataset\\BP data set 13-12-2024\\AI\\dark chocolate.xlsx"
+}
+
+all_data = []
+results = []
+
+def fft_energy(series):
+    clean_series = series.dropna()
+    if len(clean_series) > 0:
+        fft_vals = np.fft.fft(clean_series)
+        fft_mag = np.abs(fft_vals)
+        energy = np.sum(fft_mag**2)
+        return energy
+    else:
+        return np.nan
+
+for motion_label, file_path in excel_files.items():
+    sheets_dict = pd.read_excel(file_path, sheet_name=None)
+    for sheet_name, df in sheets_dict.items():
+        # 数据清洗和转置
+        df = df.iloc[:-1]
+        df = df.set_index('Time')
+        df = df.transpose()
+        df.index.name = 'Time'
+        df.reset_index(inplace=True)
+
+        # 检查Pulse列，如无则填充NaN
+        if 'Pulse' not in df.columns:
+            df['Pulse'] = float('nan')
+
+        # 转换时间
+        df['Time'] = pd.to_datetime(df['Time'], format='%Y-%m-%d-%H/%M/%S', errors='coerce')
+
+        # 转换为数值类型
+        df['SBP/mmHg'] = pd.to_numeric(df['SBP/mmHg'], errors='coerce')
+        df['DBP/mmHg'] = pd.to_numeric(df['DBP/mmHg'], errors='coerce')
+        df['MAP/mmHg'] = pd.to_numeric(df['MAP/mmHg'], errors='coerce')
+        df['Pulse'] = pd.to_numeric(df['Pulse'], errors='coerce')
+
+        # 计算PP和MAP列
+        # PP = SBP - DBP
+        df['PP'] = df['SBP/mmHg'] - df['DBP/mmHg']
+        # MAP = DBP + (SBP-DBP)/3
+        # 如果已经有MAP列，可以覆盖计算；若MAP/mmHg本身不可靠，可以重算
+        df['MAP_calc'] = df['DBP/mmHg'] + (df['SBP/mmHg'] - df['DBP/mmHg'])/3
+
+        # 定义一个函数方便计算各类特征
+        def calc_features(series):
+            mean_val = series.mean()
+            median_val = series.median()
+            std_val = series.std()
+            diff_series = series.diff().dropna()
+            diff_mean = diff_series.mean()
+            diff_std = diff_series.std()
+            fft_val = fft_energy(series)
+            return mean_val, median_val, std_val, diff_mean, diff_std, fft_val
+
+        # SBP特征
+        sbp_mean, sbp_median, sbp_std, sbp_diff_mean, sbp_diff_std, sbp_fft_energy = calc_features(df['SBP/mmHg'])
+
+        # DBP特征
+        dbp_mean, dbp_median, dbp_std, dbp_diff_mean, dbp_diff_std, dbp_fft_energy = calc_features(df['DBP/mmHg'])
+
+        # Pulse特征
+        pulse_mean, pulse_median, pulse_std, pulse_diff_mean, pulse_diff_std, pulse_fft_energy = calc_features(df['Pulse'])
+
+        # PP特征
+        pp_mean, pp_median, pp_std, pp_diff_mean, pp_diff_std, pp_fft_energy = calc_features(df['PP'])
+
+        # MAP特征（使用计算得到的MAP_calc）
+        map_mean, map_median, map_std, map_diff_mean, map_diff_std, map_fft_energy = calc_features(df['MAP_calc'])
+
+        # 添加motion和sheet信息
+        df['motion_type'] = motion_label
+        df['sheet_name'] = sheet_name
+        all_data.append(df)
+
+        # 将特征记录为字典
+        feature_dict = {
+            'motion_label': motion_label,
+
+            # SBP特征
+            'sbp_mean': sbp_mean,
+            'sbp_median': sbp_median,
+            'sbp_std': sbp_std,
+            'sbp_diff_mean': sbp_diff_mean,
+            'sbp_diff_std': sbp_diff_std,
+            'sbp_fft_energy': sbp_fft_energy,
+
+            # DBP特征
+            'dbp_mean': dbp_mean,
+            'dbp_median': dbp_median,
+            'dbp_std': dbp_std,
+            'dbp_diff_mean': dbp_diff_mean,
+            'dbp_diff_std': dbp_diff_std,
+            'dbp_fft_energy': dbp_fft_energy,
+
+            # Pulse特征
+            'pulse_mean': pulse_mean,
+            'pulse_median': pulse_median,
+            'pulse_std': pulse_std,
+            'pulse_diff_mean': pulse_diff_mean,
+            'pulse_diff_std': pulse_diff_std,
+            'pulse_fft_energy': pulse_fft_energy,
+
+            # PP特征
+            'pp_mean': pp_mean,
+            'pp_median': pp_median,
+            'pp_std': pp_std,
+            'pp_diff_mean': pp_diff_mean,
+            'pp_diff_std': pp_diff_std,
+            'pp_fft_energy': pp_fft_energy,
+
+            # MAP特征（使用计算的MAP_calc）
+            'map_mean': map_mean,
+            'map_median': map_median,
+            'map_std': map_std,
+            'map_diff_mean': map_diff_mean,
+            'map_diff_std': map_diff_std,
+            'map_fft_energy': map_fft_energy
+        }
+        results.append(feature_dict)
+
+combined_df = pd.concat(all_data, ignore_index=True)
+
+results_df = pd.DataFrame(results)
+results_df.to_excel("features_summary.xlsx", index=False)
+print("特征汇总已保存到 features_summary.xlsx")
+
+# the next part
+#####################################
+#####################################
+df = pd.read_excel('features_summary.xlsx')  # 请根据实际文件名修改
+label_col = 'motion_label'
+feature_cols = [col for col in df.columns if col != label_col]
+
+X = df[feature_cols]
+y = df[label_col]
+
+label_encoder = LabelEncoder()
+y_encoded = label_encoder.fit_transform(y)  # 将motion_label转换为数字
+
+X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.3, random_state=42, stratify=y_encoded)
+
+model = xgb.XGBClassifier(
+    n_estimators=100,
+    max_depth=5,
+    learning_rate=0.1,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42
+)
+
+model.fit(X_train, y_train)
+
+y_pred = model.predict(X_test)
+acc = accuracy_score(y_test, y_pred)
+print("Test Accuracy:", acc)
+
+print("Predicted labels:", label_encoder.inverse_transform(y_pred))
