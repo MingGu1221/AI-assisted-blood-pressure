@@ -1,0 +1,117 @@
+clc;
+clear all;
+close all;
+
+% 文件路径
+file_lie_down = 'C:\Users\Ming\Dropbox\AAA_NUS\Zi-ang ML\BP dataset\AI\lie down.xlsx';
+file_sit = 'C:\Users\Ming\Dropbox\AAA_NUS\Zi-ang ML\BP dataset\AI\sit.xlsx';
+
+% 初始化图形
+figure;
+hold on;
+
+% --------------------- lie down 数据处理 ---------------------
+sheets = sheetnames(file_lie_down);
+numSheets = length(sheets);
+
+% 获取示例数据以确定列数
+data_example = readmatrix(file_lie_down, 'Sheet', sheets{1});
+data_row_example = data_example(2, 7:end);
+numColumns = length(data_row_example); 
+x = 0:3:(numColumns-1)*3; 
+
+% 初始化数据存储变量
+y_data_lie_down = zeros(numSheets, numColumns);
+data_lie_down = []; % 用于存储所有 lie down 数据
+for i = 1:numSheets
+    sheetName = sheets{i};
+    data = readmatrix(file_lie_down, 'Sheet', sheetName);
+    % 从第2行，第7列开始读取数据
+    y_data_lie_down(i, :) = data(2, 7:end);
+    plot(x, y_data_lie_down(i, :), 'k', 'linewidth', 0.8);
+    % 累加数据用于后续 SVM 训练
+    data_lie_down = [data_lie_down; y_data_lie_down(i, :)];
+end
+h1 = plot(NaN, NaN, 'k', 'linewidth', 0.8); % 用于图例
+
+% --------------------- sit 数据处理 ---------------------
+sheets = sheetnames(file_sit);
+numSheets = length(sheets);  
+
+% 获取示例数据以确定列数
+data_example = readmatrix(file_sit, 'Sheet', sheets{1});
+data_row_example = data_example(2, 7:end);
+numColumns = length(data_row_example); 
+x = 0:3:(numColumns-1)*3; 
+
+% 初始化数据存储变量
+y_data_sit = zeros(numSheets, numColumns);
+data_sit = []; % 用于存储所有 sit 数据
+for i = 1:numSheets
+    sheetName = sheets{i};   
+    data = readmatrix(file_sit, 'Sheet', sheetName);
+    y_data_sit(i, :) = data(2, 7:end);
+    plot(x, y_data_sit(i, :), 'b', 'linewidth', 0.8);
+    % 累加数据用于后续 SVM 训练
+    data_sit = [data_sit; y_data_sit(i, :)];
+end
+h2 = plot(NaN, NaN, 'b', 'linewidth', 0.8); % 用于图例
+
+hold off;
+
+% 设置图例
+legend([h1, h2], {'lie down', 'sit'}, 'Box', 'off');
+ylim([50 99]);
+set(gca, 'linewidth', 1.5);
+grid on;
+title("The SBP blood pressure of sit and lie down behavior", 'FontSize', 12);
+ylabel("SBP/mmHg", 'FontSize', 12);
+xlabel("Time/minute", 'FontSize', 12);
+
+% --------------------- 数据准备用于 SVM ---------------------
+
+% 创建标签
+labels_lie_down = zeros(size(data_lie_down, 1), 1); % 标签为 0
+labels_sit = ones(size(data_sit, 1), 1); % 标签为 1
+
+% 合并数据和标签
+X = [data_lie_down; data_sit]; % 特征数据
+Y = [labels_lie_down; labels_sit]; % 标签
+
+disp(['Total samples: ', num2str(size(X,1))]);
+disp(['Number of features: ', num2str(size(X,2))]);
+
+% 特征标准化（均值为0，方差为1）
+[X, mu, sigma] = zscore(X);
+
+% 设置随机数种子，保证结果可重复
+rng(1);
+
+% 使用 5 折交叉验证
+K = 5;
+cv = cvpartition(size(X,1), 'KFold', K);
+
+accuracies = zeros(K,1);
+
+for i = 1:K
+    idxTrain = training(cv, i);
+    idxTest = test(cv, i);
+
+    XTrain = X(idxTrain, :);
+    YTrain = Y(idxTrain);
+    XTest = X(idxTest, :);
+    YTest = Y(idxTest);
+
+    % 训练模型
+    SVMModel = fitcsvm(XTrain, YTrain, 'KernelFunction', 'linear', 'Standardize', false);
+
+    % 预测
+    YPred = predict(SVMModel, XTest);
+
+    % 计算准确率
+    accuracies(i) = sum(YPred == YTest) / length(YTest);
+end
+
+% 计算平均准确率
+avgAccuracy = mean(accuracies);
+disp(['Average Cross-Validation Accuracy: ', num2str(avgAccuracy*100), '%']);
